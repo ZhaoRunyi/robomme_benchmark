@@ -45,6 +45,7 @@ from ..robomme_env.utils import reset_panda
 from ..robomme_env.utils import planner_denseStep
 # Pose continuousness and RPY statistics logic unified in shared util to avoid divergent implementations.
 from ..robomme_env.utils.rpy_util import build_endeffector_pose_dict
+from .planner_state import sync_gripper_state_from_robot
 
 from ..logging_utils import logger
 
@@ -309,11 +310,18 @@ class DemonstrationWrapper(gym.Wrapper):
         # Only keep first 7 joint dims for joint_state_list
         joint_state = state_flat[:7]
 
+        joint_action = np.asarray(action, dtype=np.float32).reshape(-1)
+        if joint_action.size == 7:
+            joint_action = np.concatenate([joint_action, np.asarray([-1.0], dtype=np.float32)])
+        if joint_action.shape != (8,):
+            raise ValueError(f"Expected an 8D joint action after normalization, got {joint_action.shape}")
+
         # ───────── Build new_obs (always-present fields first) ─────────
         new_obs = {
             'front_rgb_list': image_np,
             'wrist_rgb_list': wrist_image_np,
             'joint_state_list': joint_state,
+            'joint_action_list': joint_action,
             # 'end_effector_pose_raw': robot_endeffector_pose_np,  # Kept for quick restore if needed.
             'eef_state_list': eef_state_list_f64,
             'gripper_state_list': gripper_state,
@@ -753,6 +761,11 @@ class DemonstrationWrapper(gym.Wrapper):
                 base_pose=self.unwrapped.agent.robot.pose,
                 visualize_target_grasp_pose=False,
                 print_env_info=False,
+            )
+            sync_gripper_state_from_robot(
+                planner,
+                self.unwrapped.agent.robot,
+                self.unwrapped.agent.controller.controllers.get("gripper"),
             )
 
         # Wrap screw call at planner instance level: automatic switch to RRT* retry after screw failure
